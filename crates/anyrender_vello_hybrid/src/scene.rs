@@ -121,7 +121,8 @@ impl<'a> ImageManager<'a> {
 }
 
 pub(crate) enum LayerKind {
-    Layer,
+    /// A layer, and how many more were nested inside it for a filter list.
+    Layer(usize),
     Clip,
 }
 
@@ -206,14 +207,20 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
-        let filter = filter.and_then(crate::filters::convert_filter);
+        let mut filters = filter.map(crate::filters::convert_filter).unwrap_or_default();
+        // The last filter applies last: it goes on the outer layer, which also
+        // blends; the others nest inside it, the first innermost.
+        let filter = filters.pop();
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
-        self.layer_stack.push(LayerKind::Layer);
+        self.layer_stack.push(LayerKind::Layer(filters.len()));
         self.scene
             .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
         self.scene
             .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
+        for inner in filters.into_iter().rev() {
+            self.scene.push_layer(None, None, None, None, Some(inner));
+        }
     }
 
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
@@ -227,7 +234,10 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     fn pop_layer(&mut self) {
         if let Some(kind) = self.layer_stack.pop() {
             match kind {
-                LayerKind::Layer => {
+                LayerKind::Layer(nested) => {
+                    for _ in 0..nested {
+                        self.scene.pop_layer();
+                    }
                     self.scene.pop_layer();
                     self.scene.pop_clip();
                 }

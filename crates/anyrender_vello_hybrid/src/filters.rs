@@ -3,18 +3,18 @@ use std::sync::Arc;
 use anyrender::filters::{EdgeMode, Filter, FilterEffect};
 use vello_common::filter_effects::FilterPrimitive;
 
-pub(crate) fn convert_filter(filter: Arc<Filter>) -> Option<vello_common::filter_effects::Filter> {
-    let nodes = filter.nodes();
-    if nodes.is_empty() {
-        return None;
-    }
-
-    // Vello Hybrid only supports single-node filters at the moment
-    let node = &filter.nodes()[0];
-    let primitive = convert_filter_effect(&node.effect)?;
-    Some(vello_common::filter_effects::Filter::from_primitive(
-        primitive,
-    ))
+/// The filters of a linear filter list (CSS `filter: a() b() ...`), one per
+/// effect, in the order they apply. Vello Hybrid runs one primitive per
+/// layer, so the painter nests a layer for each, the first innermost; each
+/// result is clamped before the next, as in browsers. Effects Vello can't
+/// run are left out.
+pub(crate) fn convert_filter(filter: Arc<Filter>) -> Vec<vello_common::filter_effects::Filter> {
+    filter
+        .nodes()
+        .iter()
+        .filter_map(|node| convert_filter_effect(&node.effect))
+        .map(vello_common::filter_effects::Filter::from_primitive)
+        .collect()
 }
 
 pub(crate) fn convert_filter_effect(effect: &FilterEffect) -> Option<FilterPrimitive> {
@@ -35,7 +35,7 @@ pub(crate) fn convert_filter_effect(effect: &FilterEffect) -> Option<FilterPrimi
             dx: offset.x as f32,
             dy: offset.y as f32,
         },
-        FilterEffect::ColorMatrix(_matrix) => return None, //FilterPrimitive::ColorMatrix { matrix: matrix.0 },
+        FilterEffect::ColorMatrix(matrix) => FilterPrimitive::ColorMatrix { matrix: matrix.0 },
         FilterEffect::Blend(_mode) => return None,         //FilterPrimitive::Blend { mode: *mode },
         FilterEffect::ComponentTransfer(_component_transfer_filter) => return None,
         FilterEffect::Composite(_composite_operator) => return None,
